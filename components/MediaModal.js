@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Modal,
   View, 
@@ -17,21 +17,33 @@ const { width, height } = Dimensions.get('window');
 
 export default function MediaModal({ visible, media, onClose, onDelete, onShare }) {
   const [showControls, setShowControls] = useState(true);
+  const [playerKey, setPlayerKey] = useState(0); // Key para forzar recreación del player
   
-  // Crear el player de video solo cuando sea necesario
-  const player = useVideoPlayer(media?.mediaType === 'video' ? media.uri : null, (player) => {
-    player.loop = false;
-    player.muted = false;
+  // Solo crear el player si tenemos media y está visible
+  const videoSource = visible && media?.mediaType === 'video' ? media.uri : null;
+  
+  // El player se recrea cada vez que cambia el videoSource o el key
+  const player = useVideoPlayer(videoSource, (player) => {
+    if (player && videoSource) {
+      player.loop = false;
+      player.muted = false;
+    }
   });
 
-  React.useEffect(() => {
-    // Limpiar el player cuando el modal se cierre
-    return () => {
-      if (player) {
-        player.remove();
-      }
-    };
-  }, [player]);
+  // Recrear el player cuando el modal se cierra/abre
+  useEffect(() => {
+    if (!visible && media?.mediaType === 'video') {
+      // Incrementamos el key para forzar la recreación del player la próxima vez
+      setPlayerKey(prev => prev + 1);
+    }
+  }, [visible, media]);
+
+  // Resetear controles cuando se abre el modal
+  useEffect(() => {
+    if (visible) {
+      setShowControls(true);
+    }
+  }, [visible]);
 
   if (!media) return null;
 
@@ -120,7 +132,9 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
               onPress={toggleControls}
               activeOpacity={1}
             >
+              {/* Usar el key para forzar recreación cuando sea necesario */}
               <VideoView 
+                key={`video-${media.id}-${playerKey}`}
                 style={styles.fullscreenVideo}
                 player={player}
                 allowsFullscreen={false}
