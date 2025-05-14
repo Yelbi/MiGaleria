@@ -12,9 +12,9 @@ export const pickMedia = async () => {
       return null;
     }
 
-    // Abrir selector de medios
+    // Abrir selector de medios - Usando la nueva API
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: [ImagePicker.MediaType.Images, ImagePicker.MediaType.Videos], // Nueva forma recomendada
       allowsMultipleSelection: true,
       quality: 0.8,
       videoExportPreset: ImagePicker.VideoExportPreset.MediumQuality,

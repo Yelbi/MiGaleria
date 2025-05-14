@@ -9,27 +9,42 @@ import {
   Text,
   Alert
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 
 const { width, height } = Dimensions.get('window');
 
 export default function MediaModal({ visible, media, onClose, onDelete, onShare }) {
-  const videoRef = useRef(null);
-  const [videoStatus, setVideoStatus] = useState({});
+  const [showControls, setShowControls] = useState(true);
+  
+  // Crear el player de video solo cuando sea necesario
+  const player = useVideoPlayer(media?.mediaType === 'video' ? media.uri : null, (player) => {
+    player.loop = false;
+    player.muted = false;
+  });
+
+  React.useEffect(() => {
+    // Limpiar el player cuando el modal se cierre
+    return () => {
+      if (player) {
+        player.remove();
+      }
+    };
+  }, [player]);
 
   if (!media) return null;
 
   const isVideo = media.mediaType === 'video';
 
-  const handleVideoPress = () => {
-    if (videoRef.current && isVideo) {
-      if (videoStatus.isPlaying) {
-        videoRef.current.pauseAsync();
-      } else {
-        videoRef.current.playAsync();
-      }
+  const toggleControls = () => {
+    setShowControls(!showControls);
+    
+    // Auto-hide controls after 3 seconds
+    if (!showControls) {
+      setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
     }
   };
 
@@ -69,49 +84,49 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
       onRequestClose={onClose}
     >
       <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.button}
-            onPress={onClose}
-          >
-            <Ionicons name="close" size={24} color="white" />
-          </TouchableOpacity>
-          
-          <View style={styles.headerButtons}>
+        {/* Header - Solo mostrar si los controles están activos o no es video */}
+        {(showControls || !isVideo) && (
+          <View style={styles.header}>
             <TouchableOpacity 
               style={styles.button}
-              onPress={handleShare}
+              onPress={onClose}
             >
-              <Ionicons name="share" size={24} color="white" />
+              <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
             
-            <TouchableOpacity 
-              style={styles.button}
-              onPress={handleDelete}
-            >
-              <Ionicons name="trash" size={24} color="white" />
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity 
+                style={styles.button}
+                onPress={handleShare}
+              >
+                <Ionicons name="share" size={24} color="white" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.button}
+                onPress={handleDelete}
+              >
+                <Ionicons name="trash" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
         
         {/* Media Content */}
         <View style={styles.mediaContainer}>
           {isVideo ? (
             <TouchableOpacity 
               style={styles.videoContainer}
-              onPress={handleVideoPress}
+              onPress={toggleControls}
               activeOpacity={1}
             >
-              <Video
-                ref={videoRef}
+              <VideoView 
                 style={styles.fullscreenVideo}
-                source={{ uri: media.uri }}
-                shouldPlay={false}
-                isLooping={false}
-                resizeMode={ResizeMode.CONTAIN}
-                useNativeControls={true}
-                onPlaybackStatusUpdate={setVideoStatus}
+                player={player}
+                allowsFullscreen={false}
+                allowsPictureInPicture={false}
+                showsTimecodes={showControls}
+                requiresLinearPlayback={false}
               />
             </TouchableOpacity>
           ) : (
@@ -123,16 +138,18 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
           )}
         </View>
         
-        {/* Footer with metadata */}
-        <View style={styles.footer}>
-          <Text style={styles.filename}>{media.filename}</Text>
-          <Text style={styles.metadata}>
-            {new Date(media.createdAt).toLocaleString()}
-            {media.duration && (
-              <> • {Math.round(media.duration / 1000)}s</>
-            )}
-          </Text>
-        </View>
+        {/* Footer with metadata - Solo mostrar si los controles están activos o no es video */}
+        {(showControls || !isVideo) && (
+          <View style={styles.footer}>
+            <Text style={styles.filename}>{media.filename}</Text>
+            <Text style={styles.metadata}>
+              {new Date(media.createdAt).toLocaleString()}
+              {media.duration && (
+                <> • {Math.round(media.duration / 1000)}s</>
+              )}
+            </Text>
+          </View>
+        )}
       </View>
     </Modal>
   );
