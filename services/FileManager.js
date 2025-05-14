@@ -25,7 +25,9 @@ export const saveMediaFiles = async (mediaArray) => {
     
     for (const media of mediaArray) {
       // Crear nombre único para el archivo
-      const filename = `${Date.now()}_${media.filename || 'media'}`;
+      const originalFilename = media.filename || media.fileName || 'media';
+      const extension = originalFilename.split('.').pop() || (media.mediaType === 'video' ? 'mp4' : 'jpg');
+      const filename = `${Date.now()}_${originalFilename}`;
       const fileUri = MEDIA_DIRECTORY + filename;
       
       // Copiar archivo al directorio de la app
@@ -34,11 +36,22 @@ export const saveMediaFiles = async (mediaArray) => {
         to: fileUri,
       });
       
+      // Determinar mediaType si no está definido
+      let mediaType = media.mediaType || media.type;
+      if (!mediaType) {
+        // Detectar por extensión
+        const ext = extension.toLowerCase();
+        const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', '3gp', 'webm', 'm4v'];
+        mediaType = videoExtensions.includes(ext) ? 'video' : 'image';
+      }
+      
       // Crear objeto de media con metadata
       const savedMedia = {
         ...media,
         localUri: fileUri,
         savedAt: new Date().toISOString(),
+        mediaType: mediaType, // Asegurar que el mediaType esté definido
+        filename: originalFilename,
       };
       
       savedFiles.push(savedMedia);
@@ -67,9 +80,18 @@ export const getSavedMedia = async () => {
       for (const item of media) {
         const fileInfo = await FileSystem.getInfoAsync(item.localUri || item.uri);
         if (fileInfo.exists) {
+          // Asegurar que el mediaType esté definido para archivos existentes
+          let mediaType = item.mediaType || item.type;
+          if (!mediaType && item.filename) {
+            const ext = item.filename.toLowerCase().split('.').pop();
+            const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', '3gp', 'webm', 'm4v'];
+            mediaType = videoExtensions.includes(ext) ? 'video' : 'image';
+          }
+          
           validMedia.push({
             ...item,
             uri: item.localUri || item.uri, // Usar URI local si existe
+            mediaType: mediaType || 'image', // Por defecto imagen si no se puede determinar
           });
         }
       }

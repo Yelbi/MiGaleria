@@ -9,34 +9,14 @@ import {
   Text,
   Alert
 } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
+import VideoPlayer from './VideoPlayer';
 
 const { width, height } = Dimensions.get('window');
 
 export default function MediaModal({ visible, media, onClose, onDelete, onShare }) {
   const [showControls, setShowControls] = useState(true);
-  const [playerKey, setPlayerKey] = useState(0); // Key para forzar recreación del player
-  
-  // Solo crear el player si tenemos media y está visible
-  const videoSource = visible && media?.mediaType === 'video' ? media.uri : null;
-  
-  // El player se recrea cada vez que cambia el videoSource o el key
-  const player = useVideoPlayer(videoSource, (player) => {
-    if (player && videoSource) {
-      player.loop = false;
-      player.muted = false;
-    }
-  });
-
-  // Recrear el player cuando el modal se cierra/abre
-  useEffect(() => {
-    if (!visible && media?.mediaType === 'video') {
-      // Incrementamos el key para forzar la recreación del player la próxima vez
-      setPlayerKey(prev => prev + 1);
-    }
-  }, [visible, media]);
 
   // Resetear controles cuando se abre el modal
   useEffect(() => {
@@ -47,18 +27,7 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
 
   if (!media) return null;
 
-  const isVideo = media.mediaType === 'video';
-
-  const toggleControls = () => {
-    setShowControls(!showControls);
-    
-    // Auto-hide controls after 3 seconds
-    if (!showControls) {
-      setTimeout(() => {
-        setShowControls(false);
-      }, 3000);
-    }
-  };
+  const isVideo = media.mediaType === 'video' || media.type === 'video';
 
   const handleDelete = () => {
     Alert.alert(
@@ -78,7 +47,10 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
   const handleShare = async () => {
     try {
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(media.uri);
+        await Sharing.shareAsync(media.uri, {
+          mimeType: isVideo ? 'video/*' : 'image/*',
+          dialogTitle: 'Compartir archivo',
+        });
       } else {
         Alert.alert('Error', 'No se puede compartir en este dispositivo');
       }
@@ -88,80 +60,99 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
     }
   };
 
+  const toggleControlsVisibility = () => {
+    setShowControls(!showControls);
+  };
+
   return (
     <Modal
       visible={visible}
       transparent={false}
       animationType="fade"
       onRequestClose={onClose}
+      statusBarTranslucent={true}
     >
       <View style={styles.container}>
-        {/* Header - Solo mostrar si los controles están activos o no es video */}
-        {(showControls || !isVideo) && (
-          <View style={styles.header}>
+        {isVideo ? (
+          <VideoPlayer
+            videoUri={media.uri}
+            visible={visible}
+            onClose={onClose}
+            autoPlay={true}
+            showControls={true}
+          />
+        ) : (
+          <>
+            {/* Imagen */}
             <TouchableOpacity 
-              style={styles.button}
-              onPress={onClose}
-            >
-              <Ionicons name="close" size={24} color="white" />
-            </TouchableOpacity>
-            
-            <View style={styles.headerButtons}>
-              <TouchableOpacity 
-                style={styles.button}
-                onPress={handleShare}
-              >
-                <Ionicons name="share" size={24} color="white" />
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.button}
-                onPress={handleDelete}
-              >
-                <Ionicons name="trash" size={24} color="white" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-        
-        {/* Media Content */}
-        <View style={styles.mediaContainer}>
-          {isVideo ? (
-            <TouchableOpacity 
-              style={styles.videoContainer}
-              onPress={toggleControls}
+              style={styles.imageContainer}
+              onPress={toggleControlsVisibility}
               activeOpacity={1}
             >
-              {/* Usar el key para forzar recreación cuando sea necesario */}
-              <VideoView 
-                key={`video-${media.id}-${playerKey}`}
-                style={styles.fullscreenVideo}
-                player={player}
-                allowsFullscreen={false}
-                allowsPictureInPicture={false}
-                showsTimecodes={showControls}
-                requiresLinearPlayback={false}
+              <Image 
+                source={{ uri: media.uri }} 
+                style={styles.fullscreenImage}
+                resizeMode="contain"
               />
             </TouchableOpacity>
-          ) : (
-            <Image 
-              source={{ uri: media.uri }} 
-              style={styles.fullscreenImage}
-              resizeMode="contain"
-            />
-          )}
-        </View>
+            
+            {/* Controles para imágenes */}
+            {showControls && (
+              <View style={styles.imageControls}>
+                <View style={styles.header}>
+                  <TouchableOpacity 
+                    style={styles.button}
+                    onPress={onClose}
+                  >
+                    <Ionicons name="close" size={24} color="white" />
+                  </TouchableOpacity>
+                  
+                  <View style={styles.headerButtons}>
+                    <TouchableOpacity 
+                      style={styles.button}
+                      onPress={handleShare}
+                    >
+                      <Ionicons name="share" size={24} color="white" />
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.button}
+                      onPress={handleDelete}
+                    >
+                      <Ionicons name="trash" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                <View style={styles.footer}>
+                  <Text style={styles.filename}>{media.filename}</Text>
+                  <Text style={styles.metadata}>
+                    {new Date(media.createdAt).toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </>
+        )}
         
-        {/* Footer with metadata - Solo mostrar si los controles están activos o no es video */}
-        {(showControls || !isVideo) && (
-          <View style={styles.footer}>
-            <Text style={styles.filename}>{media.filename}</Text>
-            <Text style={styles.metadata}>
-              {new Date(media.createdAt).toLocaleString()}
-              {media.duration && (
-                <> • {Math.round(media.duration / 1000)}s</>
-              )}
-            </Text>
+        {/* Botones de acción para videos (fuera del player) */}
+        {isVideo && (
+          <View style={styles.videoActions}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleShare}
+            >
+              <Ionicons name="share" size={20} color="white" />
+              <Text style={styles.actionText}>Compartir</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleDelete}
+            >
+              <Ionicons name="trash" size={20} color="white" />
+              <Text style={styles.actionText}>Eliminar</Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -174,12 +165,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'black',
   },
+  imageContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenImage: {
+    width: width,
+    height: height,
+  },
+  imageControls: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   header: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -194,23 +200,8 @@ const styles = StyleSheet.create({
   button: {
     padding: 8,
     marginHorizontal: 4,
-  },
-  mediaContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fullscreenImage: {
-    width: width,
-    height: height,
-  },
-  videoContainer: {
-    width: width,
-    height: height,
-  },
-  fullscreenVideo: {
-    width: width,
-    height: height,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 20,
   },
   footer: {
     position: 'absolute',
@@ -228,6 +219,25 @@ const styles = StyleSheet.create({
   metadata: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
+    marginTop: 4,
+  },
+  videoActions: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    flexDirection: 'column',
+    gap: 16,
+  },
+  actionButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 12,
+    borderRadius: 8,
+    minWidth: 80,
+  },
+  actionText: {
+    color: 'white',
+    fontSize: 12,
     marginTop: 4,
   },
 });
