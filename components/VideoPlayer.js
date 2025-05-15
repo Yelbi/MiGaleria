@@ -30,18 +30,16 @@ export default function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [showControlsOverlay, setShowControlsOverlay] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [isBuffering, setIsBuffering] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showPlaybackSpeed, setShowPlaybackSpeed] = useState(false);
+  const [seekPosition, setSeekPosition] = useState(0);
   
   // Animated values
   const controlsOpacity = useRef(new Animated.Value(1)).current;
-  const bufferingRotation = useRef(new Animated.Value(0)).current;
-  const seekIndicatorOpacity = useRef(new Animated.Value(0)).current;
   const volumeIndicatorOpacity = useRef(new Animated.Value(0)).current;
   
   const controlsTimeoutRef = useRef(null);
@@ -98,13 +96,14 @@ export default function VideoPlayer({
     };
   }, [player, isLoading]);
 
+  // Reset controls when visible changes
   useEffect(() => {
-    // Auto-hide controles cuando empieza la reproducción
-    if (visible) {
+    if (visible && showControls) {
       setShowControlsOverlay(true);
+      showControlsWithAnimation();
       hideControlsAfterDelay();
     }
-  }, [visible]);
+  }, [visible, showControls]);
 
   const hideControlsAfterDelay = () => {
     if (controlsTimeoutRef.current) {
@@ -150,14 +149,34 @@ export default function VideoPlayer({
     hideControlsAfterDelay();
   };
 
-  const seekTo = async (position) => {
-    if (!player) return;
+  // Función simplificada para seek
+  const seekTo = (time) => {
+    if (!player || duration === 0) return;
+    
+    const normalizedTime = Math.max(0, Math.min(duration, time));
+    setSeekPosition(normalizedTime);
+    setCurrentTime(normalizedTime);
     
     try {
-      await player.seekTo(position);
+      // Method for expo-video v2
+      player.currentTime = normalizedTime;
     } catch (error) {
-      console.error('Seek error:', error);
+      console.log('Seek error:', error);
     }
+  };
+
+  const handleSeekBackward = () => {
+    const newTime = Math.max(0, currentTime - 10);
+    seekTo(newTime);
+    showControlsWithAnimation();
+    hideControlsAfterDelay();
+  };
+
+  const handleSeekForward = () => {
+    const newTime = Math.min(duration, currentTime + 10);
+    seekTo(newTime);
+    showControlsWithAnimation();
+    hideControlsAfterDelay();
   };
 
   const toggleMute = () => {
@@ -167,7 +186,7 @@ export default function VideoPlayer({
     setIsMuted(newMutedState);
     player.muted = newMutedState;
     
-    // Mostrar indicador de volumen
+    // Show volume indicator
     Animated.sequence([
       Animated.timing(volumeIndicatorOpacity, {
         toValue: 1,
@@ -193,22 +212,20 @@ export default function VideoPlayer({
   };
 
   const handleSeekBarPress = (event) => {
+    if (!duration) return;
+    
     const { locationX } = event.nativeEvent;
-    let seekBarWidth;
-    
-    if (isFullscreen) {
-      seekBarWidth = height - 120; // Adjust for fullscreen
-    } else {
-      seekBarWidth = width - 120;
-    }
-    
-    const progress = locationX / seekBarWidth;
+    const seekBarWidth = width - 120; // Approximate width accounting for timestamps
+    const progress = Math.max(0, Math.min(1, locationX / seekBarWidth));
     const newTime = progress * duration;
+    
     seekTo(newTime);
+    showControlsWithAnimation();
+    hideControlsAfterDelay();
   };
 
   const formatTime = (seconds) => {
-    if (isNaN(seconds)) return '0:00';
+    if (isNaN(seconds) || seconds === 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -270,10 +287,7 @@ export default function VideoPlayer({
     >
       <View style={[
         styles.container,
-        isFullscreen && {
-          width: height,
-          height: width,
-        }
+        isFullscreen && styles.fullscreenContainer
       ]}>
         <TouchableOpacity 
           style={styles.videoContainer}
@@ -309,13 +323,13 @@ export default function VideoPlayer({
               size={32} 
               color="white" 
             />
-            <Text style={styles.volumeText}>
+            <Text style={styles.indicatorText}>
               {isMuted ? 'Silenciado' : `${Math.round(volume * 100)}%`}
             </Text>
           </Animated.View>
           
           {/* Controls overlay */}
-          {showControls && (
+          {showControls && showControlsOverlay && (
             <Animated.View
               style={[
                 styles.controlsOverlay,
@@ -324,7 +338,7 @@ export default function VideoPlayer({
             >
               {/* Top bar */}
               <View style={styles.topBar}>
-                <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <TouchableOpacity style={styles.iconButton} onPress={onClose}>
                   <Ionicons name="close" size={28} color="white" />
                 </TouchableOpacity>
                 
@@ -335,7 +349,7 @@ export default function VideoPlayer({
                   <Text style={styles.speedText}>{playbackRate}x</Text>
                 </TouchableOpacity>
                 
-                <TouchableOpacity style={styles.fullscreenButton} onPress={toggleFullscreen}>
+                <TouchableOpacity style={styles.iconButton} onPress={toggleFullscreen}>
                   <Ionicons 
                     name={isFullscreen ? "contract" : "expand"} 
                     size={24} 
@@ -347,14 +361,14 @@ export default function VideoPlayer({
               {/* Center controls */}
               <View style={styles.centerControls}>
                 <TouchableOpacity 
-                  style={styles.controlButton}
-                  onPress={() => seekTo(Math.max(0, currentTime - 10))}
+                  style={styles.centerButton}
+                  onPress={handleSeekBackward}
                 >
                   <Ionicons name="play-back" size={28} color="white" />
                 </TouchableOpacity>
                 
                 <TouchableOpacity 
-                  style={[styles.controlButton, styles.playButton]}
+                  style={[styles.centerButton, styles.playButton]}
                   onPress={togglePlayPause}
                 >
                   <Ionicons 
@@ -365,8 +379,8 @@ export default function VideoPlayer({
                 </TouchableOpacity>
                 
                 <TouchableOpacity 
-                  style={styles.controlButton}
-                  onPress={() => seekTo(Math.min(duration, currentTime + 10))}
+                  style={styles.centerButton}
+                  onPress={handleSeekForward}
                 >
                   <Ionicons name="play-forward" size={28} color="white" />
                 </TouchableOpacity>
@@ -374,7 +388,7 @@ export default function VideoPlayer({
               
               {/* Bottom controls */}
               <View style={styles.bottomControls}>
-                <TouchableOpacity style={styles.volumeButton} onPress={toggleMute}>
+                <TouchableOpacity style={styles.iconButton} onPress={toggleMute}>
                   <Ionicons 
                     name={isMuted ? "volume-mute" : volume > 0.5 ? "volume-high" : "volume-low"} 
                     size={24} 
@@ -440,6 +454,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'black',
   },
+  fullscreenContainer: {
+    // Applied dynamically
+  },
   videoContainer: {
     flex: 1,
     position: 'relative',
@@ -455,7 +472,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.9)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
   },
   loadingText: {
     color: 'white',
@@ -466,14 +483,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '50%',
     left: '50%',
-    transform: [{ translateX: -50 }, { translateY: -40 }],
+    transform: [{ translateX: -60 }, { translateY: -50 }],
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.8)',
     borderRadius: 12,
     padding: 16,
-    minWidth: 100,
+    minWidth: 120,
   },
-  volumeText: {
+  indicatorText: {
     color: 'white',
     fontSize: 14,
     marginTop: 8,
@@ -492,19 +509,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 44 : 24,
     paddingBottom: 16,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
   },
-  closeButton: {
+  iconButton: {
     width: 44,
     height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 22,
   },
   speedButton: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 16,
   },
@@ -513,36 +530,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  fullscreenButton: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 22,
-  },
   centerControls: {
     position: 'absolute',
     top: '50%',
     left: '50%',
-    transform: [{ translateX: -90 }, { translateY: -40 }],
+    transform: [{ translateX: -110 }, { translateY: -40 }],
     flexDirection: 'row',
     alignItems: 'center',
   },
-  controlButton: {
+  centerButton: {
     width: 60,
     height: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 30,
-    marginHorizontal: 8,
+    marginHorizontal: 10,
   },
   playButton: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   bottomControls: {
     position: 'absolute',
@@ -553,33 +562,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  volumeButton: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+    backgroundColor: 'rgba(0,0,0,0.7)',
   },
   timeText: {
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
     marginHorizontal: 8,
-    minWidth: 44,
+    minWidth: 45,
     textAlign: 'center',
   },
   progressContainer: {
     flex: 1,
-    height: 44,
+    height: 40,
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
   seekBarContainer: {
-    height: 44,
+    height: 40,
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 15,
   },
   seekBar: {
     height: 6,
@@ -600,11 +603,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     borderRadius: 9,
     transform: [{ translateX: -9 }],
-    elevation: 2,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
-    shadowRadius: 2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   playbackSpeedMenu: {
     position: 'absolute',
