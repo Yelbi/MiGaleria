@@ -27,6 +27,12 @@
     },
     "plugins": [
       "expo-video"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "86077eb0-6e06-42a2-ad73-7bdd8dc585c0"
+      }
+    },
+    "owner": "yelbi"
   }
 }

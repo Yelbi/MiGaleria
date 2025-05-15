@@ -13,9 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
-
-// Importación específica para VideoView
-const { VideoView, useVideoPlayer } = require('expo-video');
+import { VideoView, useVideoPlayer } from 'expo-video';
 
 const { width, height } = Dimensions.get('window');
 
@@ -30,23 +28,34 @@ export default function VideoPlayer({
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [videoStarted, setVideoStarted] = useState(false);
   
   // Referencias
   const overlayTimeout = useRef(null);
+  const initialOrientation = useRef(null);
+  const forceHideLoadingTimeout = useRef(null);
   
-  // Crear el reproductor de video
+  // Crear el reproductor de video con configuración mejorada
   const player = useVideoPlayer(videoUri, (player) => {
     if (player) {
       // Configurar el reproductor
       player.loop = false;
       player.muted = false;
       
-      // Reproducir automáticamente si está configurado
+      // Si se debe reproducir automáticamente
       if (autoPlay && visible) {
-        setTimeout(() => {
-          player.play();
-        }, 500);
+        try {
+          const playPromise = player.play();
+          if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(error => {
+              console.error('Error auto-playing video:', error);
+            });
+          }
+        } catch (error) {
+          console.error('Error calling play():', error);
+        }
       }
     }
   });
@@ -55,66 +64,166 @@ export default function VideoPlayer({
   useEffect(() => {
     if (!player) return;
 
+    let hasStartedPlaying = false;
+
     // Listener para cambios de estado
-    const statusSubscription = player.addListener('statusChange', ({ status, error }) => {
-      console.log('Video status:', status);
+    const statusSubscription = player.addListener('statusChange', (status) => {
+      console.log('Video status changed:', status);
       
-      if (error) {
-        console.error('Video error:', error);
-        setHasError(true);
-        setIsLoading(false);
-        Alert.alert('Error de reproducción', 'No se pudo cargar el video');
-      }
-      
-      if (status === 'readyToPlay') {
-        setIsLoading(false);
-        setHasError(false);
+      switch (status) {
+        case 'idle':
+          setIsLoading(false);
+          break;
+        case 'loading':
+          setIsLoading(true);
+          setHasError(false);
+          break;
+        case 'readyToPlay':
+          setIsLoading(false);
+          setHasError(false);
+          // Ocultar overlay si el video está listo
+          if (!hasStartedPlaying) {
+            const timer = setTimeout(() => {
+              setShowOverlay(false);
+            }, 1000);
+            return () => clearTimeout(timer);
+          }
+          break;
+        case 'error':
+          console.error('Video player error');
+          setHasError(true);
+          setIsLoading(false);
+          break;
       }
     });
 
-    // Listener para actualizaciones de tiempo (reducir carga)
-    const timeSubscription = player.addListener('timeUpdate', () => {
-      if (isLoading) {
+    // Listener para el estado de reproducción
+    const playingStatusSubscription = player.addListener('playingChange', (isPlaying) => {
+      console.log('Playing status changed:', isPlaying);
+      setIsPlaying(isPlaying);
+      
+      if (isPlaying && !hasStartedPlaying) {
+        hasStartedPlaying = true;
+        setVideoStarted(true);
         setIsLoading(false);
+        // Ocultar overlay después de que empiece a reproducir
+        const timer = setTimeout(() => {
+          setShowOverlay(false);
+        }, 1000);
+        return () => clearTimeout(timer);
       }
+    });
+
+    // Listener para errores
+    const errorSubscription = player.addListener('error', (error) => {
+      console.error('Video error:', error);
+      setHasError(true);
+      setIsLoading(false);
+    });
+
+    // Listener para cuando termina de cargar
+    const loadingSwitchedSubscription = player.addListener('loadingChange', (isLoading) => {
+      console.log('Loading changed:', isLoading);
+      setIsLoading(isLoading);
     });
 
     return () => {
       statusSubscription?.remove();
-      timeSubscription?.remove();
+      playingStatusSubscription?.remove();
+      errorSubscription?.remove();
+      loadingSwitchedSubscription?.remove();
     };
-  }, [player, isLoading]);
+  }, [player]);
 
-  // Resetear estado cuando se abre/cierra el modal
+  // Manejo del modal
   useEffect(() => {
     if (visible) {
       setIsLoading(true);
       setHasError(false);
-      setShowOverlay(false);
-    } else {
-      // Limpiar timeout al cerrar
+      setShowOverlay(true);
+      setIsFullscreen(false);
+      setIsPlaying(false);
+      
+      // Guardar orientación inicial
+      ScreenOrientation.getOrientationAsync().then(orientation => {
+        initialOrientation.current = orientation;
+      });
+      
+      // Auto-hide overlay después de más tiempo
       if (overlayTimeout.current) {
         clearTimeout(overlayTimeout.current);
       }
+      overlayTimeout.current = setTimeout(() => {
+        setShowOverlay(false);
+      }, 5000); // Aumentar tiempo para videos que se demoran en cargar
       
-      // Resetear orientación al cerrar
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
-      StatusBar.setHidden(false, 'fade');
+      // Timeout de seguridad para ocultar el loading después de 3 segundos
+      if (forceHideLoadingTimeout.current) {
+        clearTimeout(forceHideLoadingTimeout.current);
+      }
+      forceHideLoadingTimeout.current = setTimeout(() => {
+        console.log('Force hiding loading overlay');
+        setIsLoading(false);
+      }, 3000);
+    } else {
+      // Limpiar cuando se cierra
+      if (overlayTimeout.current) {
+        clearTimeout(overlayTimeout.current);
+      }
+      if (forceHideLoadingTimeout.current) {
+        clearTimeout(forceHideLoadingTimeout.current);
+      }
+      
+      // Restaurar orientación
+      if (initialOrientation.current) {
+        ScreenOrientation.lockAsync(initialOrientation.current);
+      } else {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+      }
+      
+      // Pausar video
+      if (player) {
+        try {
+          player.pause();
+        } catch (error) {
+          console.error('Error pausing video:', error);
+        }
+      }
     }
-  }, [visible]);
+  }, [visible, player]);
 
   // Función para mostrar/ocultar overlay
   const toggleOverlay = () => {
     setShowOverlay(!showOverlay);
     
     if (!showOverlay) {
-      // Si vamos a mostrar el overlay, ocultarlo después de 3 segundos
+      // Auto-hide después de 3 segundos
       if (overlayTimeout.current) {
         clearTimeout(overlayTimeout.current);
       }
       overlayTimeout.current = setTimeout(() => {
         setShowOverlay(false);
       }, 3000);
+    }
+  };
+
+  // Función para alternar play/pause
+  const togglePlayPause = () => {
+    if (player) {
+      try {
+        if (isPlaying) {
+          player.pause();
+        } else {
+          const playPromise = player.play();
+          if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(error => {
+              console.error('Error playing video:', error);
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error toggling play/pause:', error);
+      }
     }
   };
 
@@ -131,7 +240,20 @@ export default function VideoPlayer({
       setIsFullscreen(!isFullscreen);
     } catch (error) {
       console.error('Error toggling fullscreen:', error);
+      Alert.alert('Error', 'No se pudo cambiar el modo de pantalla');
     }
+  };
+
+  // Función para cerrar el modal
+  const handleClose = () => {
+    if (player) {
+      try {
+        player.pause();
+      } catch (error) {
+        console.error('Error pausing video on close:', error);
+      }
+    }
+    onClose();
   };
 
   // Renderizar error
@@ -141,7 +263,10 @@ export default function VideoPlayer({
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color="#ff4444" />
           <Text style={styles.errorText}>Error al cargar el video</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={onClose}>
+          <Text style={styles.errorSubtext}>
+            Verifica que el archivo sea válido y que tengas conexión
+          </Text>
+          <TouchableOpacity style={styles.retryButton} onPress={handleClose}>
             <Text style={styles.retryText}>Cerrar</Text>
           </TouchableOpacity>
         </View>
@@ -154,13 +279,13 @@ export default function VideoPlayer({
       visible={visible} 
       animationType="fade" 
       supportedOrientations={['portrait', 'landscape']}
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
       statusBarTranslucent={true}
     >
-      <StatusBar hidden={isFullscreen} backgroundColor="black" />
+      <StatusBar hidden={isFullscreen} barStyle="light-content" />
       
-      <View style={[styles.container, isFullscreen && styles.landscape]}>
-        {/* VideoView con controles nativos */}
+      <View style={styles.container}>
+        {/* Video Player */}
         <TouchableOpacity 
           style={styles.videoContainer}
           onPress={toggleOverlay}
@@ -169,42 +294,49 @@ export default function VideoPlayer({
           <VideoView 
             style={styles.video}
             player={player}
-            allowsFullscreen={false}
-            allowsPictureInPicture={false}
-            requiresLinearPlayback={false}
+            allowsFullscreen={true}
+            allowsPictureInPicture={true}
             contentFit="contain"
-            // Usar controles nativos
-            useNativeControls={true}
-            nativeControls={true}
+            nativeControls={false}
           />
           
-          {/* Overlay de carga - solo mostrar si realmente está cargando */}
-          {isLoading && (
+          {/* Overlay de carga */}
+          {isLoading && !videoStarted && (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color="white" />
               <Text style={styles.loadingText}>Cargando video...</Text>
             </View>
           )}
           
-          {/* Overlay personalizado mínimo */}
-          {showOverlay && (
-            <View style={styles.customOverlay}>
+          {/* Overlay de controles */}
+          {showOverlay && !isLoading && (
+            <View style={styles.controlsOverlay}>
               {/* Botones superiores */}
-              <View style={styles.topBar}>
-                <TouchableOpacity style={styles.overlayButton} onPress={onClose}>
+              <View style={styles.topControls}>
+                <TouchableOpacity style={styles.controlButton} onPress={handleClose}>
                   <Ionicons name="close" size={28} color="white" />
                 </TouchableOpacity>
                 
-                <View style={styles.topRightButtons}>
-                  <TouchableOpacity style={styles.overlayButton} onPress={toggleFullscreen}>
-                    <Ionicons 
-                      name={isFullscreen ? "contract-outline" : "expand-outline"} 
-                      size={24} 
-                      color="white" 
-                    />
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
+                  <Ionicons 
+                    name={isFullscreen ? "contract-outline" : "expand-outline"} 
+                    size={24} 
+                    color="white" 
+                  />
+                </TouchableOpacity>
               </View>
+              
+              {/* Control de play/pause central */}
+              <TouchableOpacity 
+                style={styles.playPauseButton}
+                onPress={togglePlayPause}
+              >
+                <Ionicons 
+                  name={isPlaying ? "pause" : "play"} 
+                  size={50} 
+                  color="white" 
+                />
+              </TouchableOpacity>
             </View>
           )}
         </TouchableOpacity>
@@ -218,16 +350,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'black',
   },
-  landscape: {
-    // Los estilos de landscape se manejan automáticamente
-  },
   videoContainer: {
     flex: 1,
-    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   video: {
-    flex: 1,
-    backgroundColor: 'black',
     width: '100%',
     height: '100%',
   },
@@ -239,56 +367,66 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    zIndex: 1000,
+    backgroundColor: 'rgba(0,0,0,0.8)',
   },
   loadingText: {
     color: 'white',
     fontSize: 16,
     marginTop: 16,
   },
-  customOverlay: {
+  controlsOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
     justifyContent: 'space-between',
-    pointerEvents: 'box-none', // Permite que los toques pasen a través del fondo
-    zIndex: 999,
+    alignItems: 'center',
   },
-  topBar: {
+  topControls: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    width: '100%',
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 50 : 30,
     paddingBottom: 16,
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
-  topRightButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  overlayButton: {
+  controlButton: {
     width: 44,
     height: 44,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.7)',
     borderRadius: 22,
-    marginLeft: 8,
+  },
+  playPauseButton: {
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 40,
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'black',
+    padding: 32,
   },
   errorText: {
     color: 'white',
     fontSize: 18,
+    fontWeight: 'bold',
     marginTop: 16,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    marginTop: 8,
     marginBottom: 32,
     textAlign: 'center',
   },
