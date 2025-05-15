@@ -24,7 +24,11 @@
     "react": "19.0.0",
     "react-native": "0.79.2",
     "react-native-safe-area-context": "^5.2.0",
-    "react-native-webview": "^13.13.5"
+    "react-native-webview": "^13.13.5",
+    "expo-screen-orientation": "~8.1.6",
+    "expo-linear-gradient": "~14.1.4",
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-reanimated": "~3.17.4"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
