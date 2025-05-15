@@ -64,8 +64,7 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
         visible={visible}
         onClose={onClose}
         autoPlay={true}
-        useNativeControls={false}  // ¡IMPORTANTE!
-        showControls={false}
+        showControls={true}
       />
     );
   }
