@@ -10,7 +10,6 @@ import {
   Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Sharing from 'expo-sharing';
 import VideoPlayer from './VideoPlayer';
 
 const { width, height } = Dimensions.get('window');
@@ -46,14 +45,7 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
 
   const handleShare = async () => {
     try {
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(media.uri, {
-          mimeType: isVideo ? 'video/*' : 'image/*',
-          dialogTitle: 'Compartir archivo',
-        });
-      } else {
-        Alert.alert('Error', 'No se puede compartir en este dispositivo');
-      }
+      await onShare(media);
     } catch (error) {
       console.error('Error sharing:', error);
       Alert.alert('Error', 'No se pudo compartir el archivo');
@@ -64,6 +56,21 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
     setShowControls(!showControls);
   };
 
+  // Si es video, mostrar el VideoPlayer
+  if (isVideo) {
+    return (
+      <VideoPlayer
+        videoUri={media.uri}
+        visible={visible}
+        onClose={onClose}
+        autoPlay={true}
+        useNativeControls={false}  // ¡IMPORTANTE!
+        showControls={false}
+      />
+    );
+  }
+
+  // Si es imagen, mostrar la modal de imagen
   return (
     <Modal
       visible={visible}
@@ -73,86 +80,53 @@ export default function MediaModal({ visible, media, onClose, onDelete, onShare 
       statusBarTranslucent={true}
     >
       <View style={styles.container}>
-        {isVideo ? (
-          <VideoPlayer
-            videoUri={media.uri}
-            visible={visible}
-            onClose={onClose}
-            autoPlay={true}
-            showControls={true}
+        {/* Imagen */}
+        <TouchableOpacity 
+          style={styles.imageContainer}
+          onPress={toggleControlsVisibility}
+          activeOpacity={1}
+        >
+          <Image 
+            source={{ uri: media.uri }} 
+            style={styles.fullscreenImage}
+            resizeMode="contain"
           />
-        ) : (
-          <>
-            {/* Imagen */}
-            <TouchableOpacity 
-              style={styles.imageContainer}
-              onPress={toggleControlsVisibility}
-              activeOpacity={1}
-            >
-              <Image 
-                source={{ uri: media.uri }} 
-                style={styles.fullscreenImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-            
-            {/* Controles para imágenes */}
-            {showControls && (
-              <View style={styles.imageControls}>
-                <View style={styles.header}>
-                  <TouchableOpacity 
-                    style={styles.button}
-                    onPress={onClose}
-                  >
-                    <Ionicons name="close" size={24} color="white" />
-                  </TouchableOpacity>
-                  
-                  <View style={styles.headerButtons}>
-                    <TouchableOpacity 
-                      style={styles.button}
-                      onPress={handleShare}
-                    >
-                      <Ionicons name="share" size={24} color="white" />
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      style={styles.button}
-                      onPress={handleDelete}
-                    >
-                      <Ionicons name="trash" size={24} color="white" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                
-                <View style={styles.footer}>
-                  <Text style={styles.filename}>{media.filename}</Text>
-                  <Text style={styles.metadata}>
-                    {new Date(media.createdAt).toLocaleString()}
-                  </Text>
-                </View>
-              </View>
-            )}
-          </>
-        )}
+        </TouchableOpacity>
         
-        {/* Botones de acción para videos (fuera del player) */}
-        {isVideo && (
-          <View style={styles.videoActions}>
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleShare}
-            >
-              <Ionicons name="share" size={20} color="white" />
-              <Text style={styles.actionText}>Compartir</Text>
-            </TouchableOpacity>
+        {/* Controles para imágenes */}
+        {showControls && (
+          <View style={styles.imageControls}>
+            <View style={styles.header}>
+              <TouchableOpacity 
+                style={styles.button}
+                onPress={onClose}
+              >
+                <Ionicons name="close" size={24} color="white" />
+              </TouchableOpacity>
+              
+              <View style={styles.headerButtons}>
+                <TouchableOpacity 
+                  style={styles.button}
+                  onPress={handleShare}
+                >
+                  <Ionicons name="share" size={24} color="white" />
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.button}
+                  onPress={handleDelete}
+                >
+                  <Ionicons name="trash" size={24} color="white" />
+                </TouchableOpacity>
+              </View>
+            </View>
             
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleDelete}
-            >
-              <Ionicons name="trash" size={20} color="white" />
-              <Text style={styles.actionText}>Eliminar</Text>
-            </TouchableOpacity>
+            <View style={styles.footer}>
+              <Text style={styles.filename}>{media.filename}</Text>
+              <Text style={styles.metadata}>
+                {new Date(media.createdAt).toLocaleString()}
+              </Text>
+            </View>
           </View>
         )}
       </View>
@@ -219,25 +193,6 @@ const styles = StyleSheet.create({
   metadata: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
-    marginTop: 4,
-  },
-  videoActions: {
-    position: 'absolute',
-    bottom: 100,
-    right: 20,
-    flexDirection: 'column',
-    gap: 16,
-  },
-  actionButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 12,
-    borderRadius: 8,
-    minWidth: 80,
-  },
-  actionText: {
-    color: 'white',
-    fontSize: 12,
     marginTop: 4,
   },
 });

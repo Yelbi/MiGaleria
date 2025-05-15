@@ -1,5 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
 import { Alert } from 'react-native';
 
 export const pickMedia = async () => {
@@ -77,8 +78,11 @@ export const pickMedia = async () => {
 
 export const shareMedia = async (media) => {
   try {
+    // Usar la URI local si existe, de lo contrario usar la URI normal
+    const uriToShare = media.localUri || media.uri;
+    
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(media.uri, {
+      await Sharing.shareAsync(uriToShare, {
         mimeType: media.mediaType === 'video' ? 'video/*' : 'image/*',
         dialogTitle: 'Compartir archivo',
       });
@@ -87,7 +91,34 @@ export const shareMedia = async (media) => {
     }
   } catch (error) {
     console.error('Error sharing media:', error);
-    throw error;
+    Alert.alert('Error', 'No se pudo compartir el archivo');
+  }
+};
+
+// Función para guardar en la galería del dispositivo
+export const saveToMediaLibrary = async (media) => {
+  try {
+    // Solicitar permisos
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    
+    if (status !== 'granted') {
+      Alert.alert('Permisos requeridos', 'Necesitamos permisos para guardar en tu galería');
+      return false;
+    }
+    
+    // Guardar en galería
+    const asset = await MediaLibrary.createAssetAsync(media.localUri || media.uri);
+    
+    if (asset) {
+      Alert.alert('Éxito', 'Archivo guardado en la galería');
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error saving to media library:', error);
+    Alert.alert('Error', 'No se pudo guardar en la galería');
+    return false;
   }
 };
 

@@ -25,83 +25,74 @@ export default function VideoPlayer({
   autoPlay = false,
   showControls = true 
 }) {
-  // Estados básicos
+  // Estados del reproductor
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [isVideoReady, setIsVideoReady] = useState(false);
   
-  // Estados de interface
-  const [showControlsOverlay, setShowControlsOverlay] = useState(true);
+  // Estados de controles
+  const [showControlsOverlay, setShowControlsOverlay] = useState(showControls);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const [showPlaybackSpeed, setShowPlaybackSpeed] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   
-  // Referencias y animaciones
+  // Referencias
   const controlsOpacity = useRef(new Animated.Value(1)).current;
-  const volumeIndicatorOpacity = useRef(new Animated.Value(0)).current;
-  const controlsTimeoutRef = useRef(null);
-  const playerRef = useRef(null);
-
-  // Crear player de video
-  const player = useVideoPlayer(visible ? videoUri : null, (player) => {
-    if (player && videoUri) {
-      playerRef.current = player;
+  const hideControlsTimeout = useRef(null);
+  
+  // Crear el reproductor de video
+  const player = useVideoPlayer(videoUri, (player) => {
+    if (player) {
+      // Configurar el reproductor
       player.loop = false;
       player.muted = isMuted;
-      player.volume = volume;
       player.playbackRate = playbackRate;
       
-      if (autoPlay) {
+      // Reproducir automáticamente si está configurado
+      if (autoPlay && visible) {
         player.play();
       }
     }
   });
 
-  // Efectos para escuchar eventos del player
+  // Configurar listeners del reproductor
   useEffect(() => {
     if (!player) return;
 
-    // Escuchar cambios en el estado de reproducción
+    // Listener para cambios en el estado de reproducción
     const playingSubscription = player.addListener('playingChange', ({ isPlaying: playing }) => {
-      console.log('Playing changed:', playing);
       setIsPlaying(playing);
-      if (playing && isVideoReady) {
-        setIsLoading(false);
+      setIsLoading(false);
+      
+      if (playing && showControls) {
         hideControlsAfterDelay();
       }
     });
 
-    // Escuchar actualizaciones de tiempo
+    // Listener para actualizaciones de tiempo
     const timeSubscription = player.addListener('timeUpdate', ({ currentTime: time, duration: dur }) => {
-      console.log('Time update:', time, dur);
       setCurrentTime(time || 0);
-      if (dur > 0) {
+      if (dur > 0 && duration !== dur) {
         setDuration(dur);
-        if (!isVideoReady) {
-          setIsVideoReady(true);
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
     });
 
-    // Escuchar cambios de estado
-    const statusSubscription = player.addListener('statusChange', ({ status, error, isLoaded }) => {
-      console.log('Status changed:', status, 'Loaded:', isLoaded);
+    // Listener para cambios de estado
+    const statusSubscription = player.addListener('statusChange', ({ status, error }) => {
+      console.log('Video status:', status);
       
       if (error) {
         console.error('Video error:', error);
         setHasError(true);
         setIsLoading(false);
-        Alert.alert('Error de reproducción', 'No se pudo reproducir el video');
+        Alert.alert('Error de reproducción', 'No se pudo cargar el video');
       }
       
-      if (status === 'readyToPlay' || isLoaded) {
-        setIsVideoReady(true);
+      if (status === 'readyToPlay') {
         setIsLoading(false);
         setHasError(false);
       }
@@ -112,24 +103,28 @@ export default function VideoPlayer({
       timeSubscription?.remove();
       statusSubscription?.remove();
     };
-  }, [player, isVideoReady]);
+  }, [player, showControls]);
 
-  // Efecto para mostrar controles cuando se abre el modal
+  // Resetear estado cuando se abre/cierra el modal
   useEffect(() => {
     if (visible) {
-      setShowControlsOverlay(true);
-      showControlsWithAnimation();
-      hideControlsAfterDelay();
-    } else {
-      // Reset states when closing
       setIsLoading(true);
-      setIsVideoReady(false);
+      setHasError(false);
       setCurrentTime(0);
-      setDuration(0);
+      setIsPlaying(false);
+      setShowControlsOverlay(showControls);
+      showControlsWithAnimation();
+      if (showControls) {
+        hideControlsAfterDelay();
+      }
+    } else {
+      // Resetear orientación al cerrar
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+      StatusBar.setHidden(false, 'fade');
     }
-  }, [visible]);
+  }, [visible, showControls]);
 
-  // Funciones de control de la interfaz
+  // Funciones de animación de controles
   const showControlsWithAnimation = useCallback(() => {
     setShowControlsOverlay(true);
     Animated.timing(controlsOpacity, {
@@ -137,7 +132,7 @@ export default function VideoPlayer({
       duration: 200,
       useNativeDriver: true,
     }).start();
-  }, [controlsOpacity]);
+  }, []);
 
   const hideControlsWithAnimation = useCallback(() => {
     Animated.timing(controlsOpacity, {
@@ -147,15 +142,15 @@ export default function VideoPlayer({
     }).start(() => {
       setShowControlsOverlay(false);
     });
-  }, [controlsOpacity]);
+  }, []);
 
   const hideControlsAfterDelay = useCallback(() => {
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
+    if (hideControlsTimeout.current) {
+      clearTimeout(hideControlsTimeout.current);
     }
     
     if (showControls && isPlaying) {
-      controlsTimeoutRef.current = setTimeout(() => {
+      hideControlsTimeout.current = setTimeout(() => {
         hideControlsWithAnimation();
       }, 3000);
     }
@@ -168,143 +163,103 @@ export default function VideoPlayer({
       showControlsWithAnimation();
       hideControlsAfterDelay();
     }
-  }, [showControlsOverlay, hideControlsWithAnimation, showControlsWithAnimation, hideControlsAfterDelay]);
+  }, [showControlsOverlay, showControlsWithAnimation, hideControlsWithAnimation, hideControlsAfterDelay]);
 
   // Funciones de control del video
-  const togglePlayPause = useCallback(() => {
-    if (!player || !isVideoReady) return;
-    
-    if (isPlaying) {
-      player.pause();
-    } else {
-      player.play();
-    }
-    
-    showControlsWithAnimation();
-    hideControlsAfterDelay();
-  }, [player, isPlaying, isVideoReady, showControlsWithAnimation, hideControlsAfterDelay]);
-
-  // Función corregida para seek - usando replay con posición específica
-  const seekTo = useCallback((time) => {
-    if (!player || !isVideoReady || duration === 0) return;
-    
-    const normalizedTime = Math.max(0, Math.min(duration, time));
-    console.log('Seeking to:', normalizedTime);
+  const togglePlayPause = useCallback(async () => {
+    if (!player) return;
     
     try {
-      // Pausar el video primero
-      const wasPlaying = isPlaying;
-      player.pause();
-      
-      // Usar replay con posición específica 
-      player.replay();
-      
-      // Intentar adelantar hasta la posición deseada
-      if (normalizedTime > 0) {
-        const seekInterval = setInterval(() => {
-          if (player.currentTime >= normalizedTime - 0.5) {
-            clearInterval(seekInterval);
-            if (wasPlaying) {
-              player.play();
-            }
-          }
-        }, 100);
-        
-        // Cleanup después de 5 segundos para evitar loops infinitos
-        setTimeout(() => {
-          clearInterval(seekInterval);
-          if (wasPlaying && !isPlaying) {
-            player.play();
-          }
-        }, 5000);
-      } else if (wasPlaying) {
-        player.play();
+      if (isPlaying) {
+        await player.pause();
+      } else {
+        await player.play();
       }
       
-      setCurrentTime(normalizedTime);
+      showControlsWithAnimation();
+      hideControlsAfterDelay();
     } catch (error) {
-      console.log('Seek error:', error);
+      console.error('Error toggling play/pause:', error);
     }
-  }, [player, duration, isVideoReady, isPlaying]);
+  }, [player, isPlaying, showControlsWithAnimation, hideControlsAfterDelay]);
 
-  const handleSeekBackward = useCallback(() => {
-    console.log('Seek backward from:', currentTime);
-    seekTo(Math.max(0, currentTime - 10));
-    showControlsWithAnimation();
-    hideControlsAfterDelay();
-  }, [seekTo, currentTime, showControlsWithAnimation, hideControlsAfterDelay]);
+  const seekTo = useCallback(async (time) => {
+    if (!player || duration === 0) return;
+    
+    try {
+      const seekTime = Math.max(0, Math.min(duration, time));
+      // Usar el método correcto para hacer seek
+      await player.seekBy(seekTime - currentTime);
+      setCurrentTime(seekTime);
+      
+      showControlsWithAnimation();
+      hideControlsAfterDelay();
+    } catch (error) {
+      console.error('Error seeking:', error);
+    }
+  }, [player, duration, currentTime, showControlsWithAnimation, hideControlsAfterDelay]);
 
-  const handleSeekForward = useCallback(() => {
-    console.log('Seek forward from:', currentTime);
-    seekTo(Math.min(duration, currentTime + 10));
-    showControlsWithAnimation();
-    hideControlsAfterDelay();
-  }, [seekTo, currentTime, duration, showControlsWithAnimation, hideControlsAfterDelay]);
+  const seekBackward = useCallback(() => {
+    const newTime = Math.max(0, currentTime - 10);
+    seekTo(newTime);
+  }, [seekTo, currentTime]);
+
+  const seekForward = useCallback(() => {
+    const newTime = Math.min(duration, currentTime + 10);
+    seekTo(newTime);
+  }, [seekTo, currentTime, duration]);
 
   const handleSeekBarPress = useCallback((event) => {
-    if (!duration || !isVideoReady) return;
+    if (duration === 0) return;
     
     const { locationX } = event.nativeEvent;
-    const seekBarWidth = width - 120;
+    const seekBarWidth = width - 100; // Ancho aproximado de la barra
     const progress = Math.max(0, Math.min(1, locationX / seekBarWidth));
     const newTime = progress * duration;
     
-    console.log('Seek bar press:', progress, newTime);
     seekTo(newTime);
-    showControlsWithAnimation();
-    hideControlsAfterDelay();
-  }, [duration, isVideoReady, seekTo, showControlsWithAnimation, hideControlsAfterDelay]);
+  }, [duration, seekTo]);
 
   const toggleMute = useCallback(() => {
-    if (!player || !isVideoReady) return;
+    if (!player) return;
     
     const newMutedState = !isMuted;
     setIsMuted(newMutedState);
     player.muted = newMutedState;
     
-    // Mostrar indicador de volumen
-    Animated.sequence([
-      Animated.timing(volumeIndicatorOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(volumeIndicatorOpacity, {
-        toValue: 0,
-        duration: 1000,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [player, isMuted, isVideoReady, volumeIndicatorOpacity]);
+    showControlsWithAnimation();
+    hideControlsAfterDelay();
+  }, [player, isMuted, showControlsWithAnimation, hideControlsAfterDelay]);
 
-  const handlePlaybackSpeed = useCallback((speed) => {
-    if (!player || !isVideoReady) return;
+  const changePlaybackSpeed = useCallback((speed) => {
+    if (!player) return;
     
     setPlaybackRate(speed);
     player.playbackRate = speed;
-    setShowPlaybackSpeed(false);
+    setShowSpeedMenu(false);
+    
     showControlsWithAnimation();
     hideControlsAfterDelay();
-  }, [player, isVideoReady, showControlsWithAnimation, hideControlsAfterDelay]);
+  }, [player, showControlsWithAnimation, hideControlsAfterDelay]);
 
   const toggleFullscreen = useCallback(async () => {
     try {
       if (isFullscreen) {
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
-        StatusBar.setHidden(false);
+        StatusBar.setHidden(false, 'fade');
       } else {
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-        StatusBar.setHidden(true);
+        StatusBar.setHidden(true, 'fade');
       }
       setIsFullscreen(!isFullscreen);
     } catch (error) {
-      console.error('Orientation error:', error);
+      console.error('Error toggling fullscreen:', error);
     }
   }, [isFullscreen]);
 
   // Funciones de utilidad
   const formatTime = useCallback((seconds) => {
-    if (isNaN(seconds) || seconds === 0) return '0:00';
+    if (isNaN(seconds) || seconds < 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -315,22 +270,15 @@ export default function VideoPlayer({
     return (currentTime / duration) * 100;
   }, [currentTime, duration]);
 
-  // Renderizado condicional para errores
+  // Renderizar error
   if (hasError) {
     return (
       <Modal visible={visible} animationType="fade" onRequestClose={onClose}>
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color="#ff4444" />
           <Text style={styles.errorText}>Error al cargar el video</Text>
-          <TouchableOpacity 
-            style={styles.retryButton} 
-            onPress={() => {
-              setHasError(false);
-              setIsLoading(true);
-              setIsVideoReady(false);
-            }}
-          >
-            <Text style={styles.retryText}>Reintentar</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={onClose}>
+            <Text style={styles.retryText}>Cerrar</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -345,7 +293,8 @@ export default function VideoPlayer({
       onRequestClose={onClose}
       statusBarTranslucent={true}
     >
-      <StatusBar hidden={isFullscreen} />
+      <StatusBar hidden={isFullscreen} backgroundColor="black" />
+      
       <View style={[styles.container, isFullscreen && styles.landscape]}>
         <TouchableOpacity 
           style={styles.videoContainer}
@@ -359,40 +308,29 @@ export default function VideoPlayer({
             allowsPictureInPicture={false}
             showsTimecodes={false}
             requiresLinearPlayback={false}
+            contentFit="contain"
+            // ¡IMPORTANTE! Estas propiedades deshabilitan los controles nativos
+            useNativeControls={false}
+            showControls={false}
           />
           
-          {/* Overlay de carga - solo mostrar si realmente está cargando */}
-          {(isLoading || !isVideoReady) && (
+          {/* Overlay de carga */}
+          {isLoading && (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color="white" />
               <Text style={styles.loadingText}>Cargando video...</Text>
             </View>
           )}
           
-          {/* Indicador de volumen */}
-          <Animated.View
-            style={[
-              styles.volumeIndicator,
-              { opacity: volumeIndicatorOpacity }
-            ]}
-          >
-            <Ionicons 
-              name={isMuted ? "volume-mute" : "volume-high"} 
-              size={32} 
-              color="white" 
-            />
-            <Text style={styles.indicatorText}>
-              {isMuted ? 'Silenciado' : `${Math.round(volume * 100)}%`}
-            </Text>
-          </Animated.View>
-          
-          {/* Overlay de controles - solo mostrar si el video está listo */}
-          {showControls && showControlsOverlay && isVideoReady && (
+          {/* Controles del video */}
+          {showControls && showControlsOverlay && (
             <Animated.View
               style={[
                 styles.controlsOverlay,
                 { opacity: controlsOpacity },
               ]}
+              // Importante: permitir que los toques pasen a través cuando es transparente
+              pointerEvents={showControlsOverlay ? 'auto' : 'none'}
             >
               {/* Barra superior */}
               <View style={styles.topBar}>
@@ -400,27 +338,29 @@ export default function VideoPlayer({
                   <Ionicons name="close" size={28} color="white" />
                 </TouchableOpacity>
                 
-                <TouchableOpacity 
-                  style={styles.speedButton}
-                  onPress={() => setShowPlaybackSpeed(!showPlaybackSpeed)}
-                >
-                  <Text style={styles.speedText}>{playbackRate}x</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity style={styles.iconButton} onPress={toggleFullscreen}>
-                  <Ionicons 
-                    name={isFullscreen ? "contract-outline" : "expand-outline"} 
-                    size={24} 
-                    color="white" 
-                  />
-                </TouchableOpacity>
+                <View style={styles.topRightButtons}>
+                  <TouchableOpacity 
+                    style={styles.speedButton}
+                    onPress={() => setShowSpeedMenu(!showSpeedMenu)}
+                  >
+                    <Text style={styles.speedText}>{playbackRate}x</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.iconButton} onPress={toggleFullscreen}>
+                    <Ionicons 
+                      name={isFullscreen ? "contract-outline" : "expand-outline"} 
+                      size={24} 
+                      color="white" 
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
               
               {/* Controles centrales */}
               <View style={styles.centerControls}>
                 <TouchableOpacity 
                   style={styles.centerButton}
-                  onPress={handleSeekBackward}
+                  onPress={seekBackward}
                 >
                   <Ionicons name="play-back" size={32} color="white" />
                 </TouchableOpacity>
@@ -438,17 +378,17 @@ export default function VideoPlayer({
                 
                 <TouchableOpacity 
                   style={styles.centerButton}
-                  onPress={handleSeekForward}
+                  onPress={seekForward}
                 >
                   <Ionicons name="play-forward" size={32} color="white" />
                 </TouchableOpacity>
               </View>
               
-              {/* Barra inferior */}
+              {/* Barra inferior con controles */}
               <View style={styles.bottomBar}>
                 <TouchableOpacity style={styles.iconButton} onPress={toggleMute}>
                   <Ionicons 
-                    name={isMuted ? "volume-mute" : volume > 0.5 ? "volume-high" : "volume-low"} 
+                    name={isMuted ? "volume-mute" : "volume-high"} 
                     size={24} 
                     color="white" 
                   />
@@ -485,8 +425,8 @@ export default function VideoPlayer({
             </Animated.View>
           )}
           
-          {/* Menú de velocidad */}
-          {showPlaybackSpeed && isVideoReady && (
+          {/* Menú de velocidad de reproducción */}
+          {showSpeedMenu && (
             <View style={styles.speedMenu}>
               {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
                 <TouchableOpacity
@@ -495,7 +435,7 @@ export default function VideoPlayer({
                     styles.speedOption,
                     playbackRate === speed && styles.selectedSpeed
                   ]}
-                  onPress={() => handlePlaybackSpeed(speed)}
+                  onPress={() => changePlaybackSpeed(speed)}
                 >
                   <Text style={styles.speedOptionText}>{speed}x</Text>
                 </TouchableOpacity>
@@ -514,7 +454,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'black',
   },
   landscape: {
-    // Estilos para pantalla completa se manejan automáticamente
+    // Los estilos de landscape se manejan automáticamente
   },
   videoContainer: {
     flex: 1,
@@ -523,6 +463,8 @@ const styles = StyleSheet.create({
   video: {
     flex: 1,
     backgroundColor: 'black',
+    width: '100%',
+    height: '100%',
   },
   loadingOverlay: {
     position: 'absolute',
@@ -533,27 +475,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.9)',
+    zIndex: 1000,
   },
   loadingText: {
     color: 'white',
     fontSize: 16,
     marginTop: 16,
-  },
-  volumeIndicator: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -60 }, { translateY: -50 }],
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 12,
-    padding: 16,
-    minWidth: 120,
-  },
-  indicatorText: {
-    color: 'white',
-    fontSize: 14,
-    marginTop: 8,
   },
   controlsOverlay: {
     position: 'absolute',
@@ -562,6 +489,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     justifyContent: 'space-between',
+    zIndex: 1001,
   },
   topBar: {
     flexDirection: 'row',
@@ -572,6 +500,10 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
+  topRightButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   iconButton: {
     width: 44,
     height: 44,
@@ -579,12 +511,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 22,
+    marginLeft: 8,
   },
   speedButton: {
     backgroundColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
+    marginRight: 8,
   },
   speedText: {
     color: 'white',
@@ -667,6 +601,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
     minWidth: 80,
+    zIndex: 1002,
   },
   speedOption: {
     paddingVertical: 12,
@@ -691,9 +626,9 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 18,
     marginTop: 16,
-    marginBottom: 24,
+    marginBottom: 32,
     textAlign: 'center',
   },
   retryButton: {
